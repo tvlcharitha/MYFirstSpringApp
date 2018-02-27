@@ -1,0 +1,83 @@
+---
+resources:
+- name: MYFirstSpringApp
+  type: git
+  source:
+    uri: {{github-repository}}
+    branch: master
+    private_key: {{github-private-key}}
+
+- name: MYFirstSpringApp-artifacts
+  type: s3
+  source:
+    bucket: {{aws-bucket}}
+    regexp: releases/MYFirstSpringApp-(.*).jar
+    access_key_id: {{aws-access-key-id}}
+    secret_access_key: {{aws-secret-access-key}}
+
+- name: version
+  type: semver
+  source:
+    bucket: {{aws-bucket}}
+    key: MYFirstSpringApp/version
+    access_key_id: {{aws-access-key-id}}
+    secret_access_key: {{aws-secret-access-key}}
+
+- name: review-deployment
+  type: cf
+  source:
+    api: {{cf-api-url}}
+    username: {{cf-username}}
+    password: {{cf-password}}
+    organization: {{cf-org}}
+    space: review
+
+- name: production-deployment
+  type: cf
+  source:
+    api: {{cf-api-url}}
+    username: {{cf-username}}
+    password: {{cf-password}}
+    organization: {{cf-org}}
+    space: production
+
+jobs:
+- name: build
+  plan:
+  - get: MYFirstSpringApp
+    trigger: true
+  - get: version
+    params: {bump: patch}
+  - task: build and test
+    file: MYFirstSpringApp/ci/build.yml
+  - put: MYFirstSpringApp-artifacts
+    params:
+      file: build-output/MYFirstSpringApp-*.jar
+  - put: version
+    params:
+      file: version/number
+
+- name: deploy-review
+  plan:
+  - get: MYFirstSpringApp
+  - get: MYFirstSpringApp-artifacts
+    trigger: true
+    passed: [build]
+  - put: review-deployment
+    params:
+      manifest: MYFirstSpringApp/manifest-review.yml
+      path: MYFirstSpringApp-artifacts/MYFirstSpringApp-*.jar
+      environment_variables:
+        WELCOME_MESSAGE: "Hello from the review environment"
+
+- name: deploy-production
+  plan:
+  - get: MYFirstSpringApp
+  - get: MYFirstSpringApp-artifacts
+    passed: [deploy-review]
+  - put: production-deployment
+    params:
+      manifest: MYFirstSpringApp/manifest-production.yml
+      path: MYFirstSpringApp-artifacts/MYFirstSpringApp-*.jar
+      environment_variables:
+        WELCOME_MESSAGE: "Hello from the production environment"
